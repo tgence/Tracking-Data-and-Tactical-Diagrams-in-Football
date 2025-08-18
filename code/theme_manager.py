@@ -60,12 +60,9 @@ class ThemeManager:
     ----------
     de_min : float, default 25.0
         Minimum ΔE00 between chosen colors and forbidden references.
-    debug : bool, default False
-        Unused in current code but kept for compatibility.
     """
-    def __init__(self, de_min: float = 25.0, debug: bool = False):
+    def __init__(self, de_min: float = 25.0):
         self.de_min = de_min
-        self.debug = debug
         # Cache computed themes to avoid recomputation when switching
         self._cache: Dict[tuple, Dict[str, str]] = {}
 
