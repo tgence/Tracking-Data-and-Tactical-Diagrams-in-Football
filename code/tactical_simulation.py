@@ -226,8 +226,7 @@ class TacticalSimulationManager:
             for tactical_arrow in self.tactical_arrows:
                 player_id = tactical_arrow['player_id']
                 action_type = tactical_arrow['action_type']
-                
-                # Calculate player position according to arrow and required speed
+                # Calculate player position according to arrow and required speed over full interval
                 player_pos = self._calculate_player_position_with_speed(
                     tactical_arrow, progress, interval_seconds, current_frame, xy_objects, get_frame_data_func
                 )
@@ -248,6 +247,8 @@ class TacticalSimulationManager:
                 self.simulated_ball_positions.append((
                     ball_pos.x(), ball_pos.y(), current_sim_frame
                 ))
+
+    
     
     def _calculate_player_position_with_speed(self, tactical_arrow, progress, interval_seconds, current_frame, xy_objects, get_frame_data_func):
         """Position a player along the arrow, capped by plausible action speed.

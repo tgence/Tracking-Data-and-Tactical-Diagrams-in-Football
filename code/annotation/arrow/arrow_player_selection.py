@@ -90,7 +90,7 @@ class ArrowPlayerSelection(QDialog):
     """Dialog to pick a player (Home/Away) with pitch-like visuals."""
     playerSelected = pyqtSignal(str, str)  # player_id, player_text
     
-    def __init__(self, home_players, away_players, title="Select Player", parent=None):
+    def __init__(self, home_players, away_players, title="Select Player", parent=None, default_selected_id=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
@@ -100,6 +100,7 @@ class ArrowPlayerSelection(QDialog):
         self.selected_player_id = None
         self.selected_player_text = None
         self.player_buttons = []
+        self.default_selected_id = default_selected_id
         
         # Grab team colors for labels
         self.home_main_color = "#4CAF50"  # default green
@@ -114,6 +115,9 @@ class ArrowPlayerSelection(QDialog):
             self.away_main_color = first_away_player[1]  # main_color
         
         self._setup_ui()
+        # Apply default selection if provided
+        if self.default_selected_id:
+            self._preselect_default(self.default_selected_id)
         
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -281,6 +285,26 @@ class ArrowPlayerSelection(QDialog):
         
         # Fixed size
         self.setFixedSize(600, 450)
+    
+    def _preselect_default(self, player_id):
+        """Preselect a player by id and enable OK."""
+        # Determine display text (number)
+        number_text = None
+        if player_id in self.home_players:
+            number_text = self.home_players[player_id][0]
+        elif player_id in self.away_players:
+            number_text = self.away_players[player_id][0]
+        if number_text is None:
+            number_text = "?"
+        
+        self.selected_player_id = player_id
+        self.selected_player_text = f"Player {number_text}"
+        # Refresh buttons selection rings
+        for btn in self.player_buttons:
+            btn.set_selected(btn.player_id == player_id)
+        # Enable OK
+        if hasattr(self, 'ok_button') and self.ok_button is not None:
+            self.ok_button.setEnabled(True)
     
     def _select_player(self, player_id, player_text):
         """Select a player"""

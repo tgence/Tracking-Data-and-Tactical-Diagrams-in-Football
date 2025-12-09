@@ -1,0 +1,172 @@
+% --------------------------------------------------------------------
+% -------------------- CHAPTER 4: IMPLEMENTATION ---------------------
+% --------------------------------------------------------------------
+\chapter{Implementation}
+\label{chap:4_implementation}
+
+This chapter explains how the features introduced in Chapter~\ref{chap:system_design} were implemented in the working prototype.  
+It focuses on the \textbf{technical execution}: data ingestion, transformation, scene rendering, algorithm design, and integration into an interactive application.
+
+\paragraph{Programming environment and dependencies}
+The implementation targets \textbf{Python~3.12.2} and relies on a combination of general-purpose and domain-specific libraries:
+\begin{itemize}
+    \item \textbf{PyQt6} for the GUI (widgets and \texttt{QGraphicsScene} used to render the pitch, players, overlays, and the timeline).
+    \item \textbf{qt\_material} to style Qt widgets (buttons, sliders, menus). This only affects the GUI chrome and is \emph{independent} of the in-pitch color logic handled by the internal \texttt{ThemeManager}.
+    \item \textbf{floodlight} to parse and read the dataset.
+    \item \textbf{NumPy} for efficient array operations on frame-indexed positional data.
+    \item \textbf{SciPy} for selected numerical routines (e.g., temporal smoothing of orientations).
+    \item \textbf{colormath} for perceptual color conversions (CIELAB/LCH) and \textbf{CIEDE2000} contrast computations in the theme optimization.
+\end{itemize}
+
+% --------------------------------------------------------------------
+\section{System Architecture Overview}
+
+The application follows a \textbf{modular manager-based architecture}. Each functional domain is encapsulated in a dedicated manager, instantiated and wired by \texttt{MainWindow} at startup. The GUI is implemented with \textbf{PyQt6}.
+
+\begin{itemize}
+    \item \textbf{MainWindow} – Loads match data, instantiates all managers, and coordinates their interactions through Qt’s signal/slot system.
+    \item \textbf{PitchWidget} – Owns the \texttt{QGraphicsScene} where static pitch lines, dynamic player/ball icons, and overlays are rendered.
+    \item \textbf{Timeline} – Custom slider widget showing key events and supporting zoom to segments.
+    \item \textbf{Managers:}
+    \begin{itemize}
+        \item \texttt{ThemeManager} – Perceptual theme generation and contrast adjustments (using \textbf{colormath} for CIELAB/LCH transforms and CIEDE2000).
+        \item \texttt{CameraManager} – View position/zoom (manual, ball-following, presets).
+        \item \texttt{TrajectoryManager} – Drawing of real and simulated trajectories with temporal fading.
+        \item \texttt{ScoreManager} – Match score/time display.
+        \item \texttt{ArrowAnnotationManager} - Manages creation, preview, selection, and editing of arrows (straight, dotted, zigzag, curved)
+        \item \texttt{RectangleZoneManager} - Manages rectangular zones: create/select/move/resize/rotate, with stroke/fill/opacity/dash styling
+        \item \texttt{EllipseZoneManager} - Same as \texttt{RectangleZoneManager} but for ellipse zones
+        \item \texttt{TacticalSimulationManager} – Overrides tracked movements with user-defined paths in looped intervals.
+        \item \texttt{SettingsManager} – Stores UI preferences (visible overlays, active theme).
+    \end{itemize}
+\end{itemize}
+
+% --------------------------------------------------------------------
+\section{Data Handling Pipeline}
+
+All match data is loaded with the \textbf{floodlight} library from \textbf{Floodlight XML files} containing \emph{tracking} (player/ball positions per frame) and \emph{events} (passes, shots, goals, etc.). The code does not manually parse XML for positions/events: floodlight provides frame-synchronized structures that the application consumes directly.  
+For auxiliary \emph{DSAM} fields (distance, speed, acceleration, minute) that are not exposed by floodlight’s high-level objects, the loader falls back to \texttt{xml.etree.ElementTree} to extract them from the same XML feed (see \texttt{data\_processing.py}).
+
+\subsection{Parsing and indexing}
+\begin{itemize}
+    \item The dataset, once read via floodlight, exposes synchronized, frame-indexed arrays for positions (players and ball). These arrays are the basis for rendering and for all analytical overlays.
+    \item Event timestamps are projected to the nearest frame index within a tolerance so that (i) the \textbf{timeline icons} and direct navigation remain \emph{frame-accurate} (see Subsection~\ref{sec:timeline_impl} and the timeline design in Chapter~\ref{chap:system_design}), and (ii) overlays recompute on the exact animation frame that the user jumps to (see Section~\ref{sec:main_algorithms}).  
+    (Procedure in Appendix~\ref{app:event_project_to_frames}, \emph{Event Projection to Frames}.)
+\end{itemize}
+
+\subsection{Derived quantities and where they are used}
+Beyond raw positions, some quantities are computed on the fly (NumPy/SciPy) and then consumed by specific UI/analytics modules:
+\begin{itemize}
+        \item\textbf{Orientation vectors} — Computed from frame-to-frame player displacements and converted to angles with \(\arctan2\). To avoid wrap-around artefacts, the angle series is mapped to its cosine/sine components, each component is smoothed (Savitzky–Golay filter \cite{schafer2011savitzky}), then the angle is reconstructed via \(\arctan2\). (see Appendix \ref{app:orientation_estimation})
+
+    \emph{Used for:} Drawing per-player direction/speed arrows; pressure computation (projection of defender speed/acceleration toward the carrier).
+    
+    \item \textbf{Ball carrier identification} – Inferred as the nearest eligible player to the ball within a 3.5 m threshold. This avoids flagging carriers while the ball is traveling (e.g., long passes).
+    
+    \emph{Used for:} pressure visualization (aura centered on the carrier) and contextual overlays (e.g., offside line toggling).
+\end{itemize}
+
+% --------------------------------------------------------------------
+\section{Rendering Cycle}
+
+Rendering uses a layered model in \texttt{QGraphicsScene}:
+\begin{enumerate}
+    \item \textbf{Static layer} – Pitch lines, goals, constant elements (cached).
+    \item \textbf{Dynamic layer} – Player and ball icons updated every frame (positions, rotations/orientations).
+    \item \textbf{Overlay layer} – Tactical visualizations (pressure auras, passing channels, annotations), recomputed when inputs change.
+\end{enumerate}
+
+\noindent\textbf{Per-frame draw cycle}:
+\begin{enumerate}
+    \item Update positions and rotations (orientation vectors) for players and ball.
+    \item Recompute active overlays from the latest frame data.
+    \item Apply the current theme to updated items.
+    \item Redraw only layers that changed since the previous frame.
+\end{enumerate}
+
+% --------------------------------------------------------------------
+\section{Key Algorithms}
+\label{sec:main_algorithms}
+
+\subsection{Perceptually-Driven Visual Theme Generation}
+\label{subsec:theme_generation}
+
+\paragraph{Goal} Ensure strong legibility regardless of team kits and the color of the pitch.
+
+\paragraph{Implementation}
+The theme optimizer searches locally in LCH space for a palette that yields the best worst-case visibility across all critical pairs (teams vs pitch, teams vs each other, lines vs pitch), with a secondary preference for higher overall average contrast.
+Candidate colors are first filtered to exclude those too close in perceptual distance, insufficiently separated in hue, or lacking minimum luminance contrast against key backgrounds.
+The optimisation score is a weighted combination of worst-case and average contrast, ensuring that no critical pair is too close while favouring palettes with strong global visibility.
+The exact candidate filtering logic and the scoring procedure are detailed in Appendix \ref{app:theme_optimization}, where step-by-step pseudocode mirrors the algorithm used in the prototype to select perceptually distinct colors.
+
+
+\subsection{Pressure Computation}
+\label{subsec:pressure}
+
+\paragraph{Goal}  
+Estimate the defensive pressure on the ball carrier at each frame and provide a scalar intensity in $[0,1]$ suitable for visualization.
+
+\paragraph{Implementation}  
+For every defender, the algorithm computes a time-to-intercept (TTI) relative to the ball carrier.  
+This estimate accounts for distance, speed, acceleration, and current orientation.  
+Each TTI is mapped to a pressing probability through a logistic function, and the contributions of all defenders are aggregated to yield a single intensity value.  
+The aggregation assumes independence between defenders for tractability, which simplifies the model but does not capture potential coordination effects.  
+The output is a smooth, interpretable signal that updates frame by frame.
+Whereas Bekkers et al.~\cite{bekkers2024pressing} compute pressing intensity from tracking-based kinematic models using time-to-intercept metrics and logistic mapping, our approach adopts a simplified kinematic approximation that omits dependencies between defenders.
+
+By projecting velocity and acceleration onto the line to the carrier, the model captures directionality: defenders moving away from the carrier contribute little or no pressure.  
+The logistic mapping ensures gradual transitions, while the aggregation naturally accounts for multiple defenders closing in simultaneously.  
+The full pseudocode is given in Appendix~\ref{app:pressure_visualization}.
+
+
+% --------------------------------------------------------------------
+\section{Implementation of Other Functionalities}
+
+\subsection{Annotation Tools}
+\begin{itemize}
+    \item \textbf{Arrows} – Straight/dashed/curved with adjustable thickness, curvature, arrowheads, and color; styles encode semantics (e.g., pass, dribble, run).  
+    \item \textbf{Zones} – Rectangles, circles, ellipses, and polygons with configurable fill/opacity/border, color, and optional labels.
+    \item \textbf{Editing} – Post-creation drag/rotate/reshape; multi-selection and layer management; presets for frequently used styles.
+    \item \textbf{Undo/Redo} – Allows the user to revert or reapply the most recent edits (e.g., position, size, or color changes).  
+\end{itemize}
+
+
+\subsection{Timeline and Event Filtering}
+\label{sec:timeline_impl}
+\begin{itemize}
+    \item The custom timeline shows key events; clicking an icon seeks the animation to the corresponding frame (see Section 4.2).
+    \item Event-type filters focus the timeline on intervals where the selected actions occur (zoom-to-type), reducing clutter.
+    \item Selecting a specific event also shows a local micro-zoom window centered on that event to inspect its immediate context.
+\end{itemize}
+
+\subsection{Camera Control}
+\begin{itemize}
+    \item \textbf{Manual} – Pan/zoom via mouse/shortcuts; reset to full-pitch.
+    \item \textbf{Ball tracking} – Keeps the ball centered while play unfolds.
+    \item \textbf{Context-aware auto-zoom} – Zoom adapts to local density/spread.
+    \item \textbf{Presets} – One-click views for corners (TLC/TRC/BLC/BRC) and penalty areas (LP/RP).
+\end{itemize}
+
+
+\subsection{Trajectories and Simulation}
+\begin{itemize}
+    \item In \textbf{Simulation Mode}, real trajectories from the tracking data are rendered with \textbf{temporal fading} to prevent the visual overload commonly known as ``spaghetti clutter'' (see Figure~\ref{fig:trajectories_fading}). 
+    When full trails of player movements are rendered simultaneously, the resulting tangle of lines quickly becomes unreadable. 
+    To maintain clarity, our approach displays only the most relevant segments: past positions are progressively erased as the player advances, while upcoming positions are shown with decreasing opacity the further they lie in the future.
+
+    \item To keep rendering efficient, trajectories are \textbf{sampled and cached} per (frame, interval) pair. This prevents unnecessary recomputation during playback or looping and ensures fluid interaction even when horizons span several seconds.
+
+    \item In the same mode, the user can already \textbf{draw arrows as annotations} and assign them an \emph{action type} (pass, shot, dribble, tackle, …), binding them to one or more players. 
+    At this stage these arrows remain descriptive only: they do not yet alter the simulation or update the event log. 
+    In \S\ref{subsec:user_authored_event_editing}, we discuss how these user-authored arrows will be extended to produce meaningful modifications of the underlying data.
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{Figures/TRAJECTORIES.png}
+  \caption{\textbf{Trajectories with temporal fading in Simulation Mode.} 
+  Past movements gradually fade out while future projections are displayed with decreasing opacity.}
+  \label{fig:trajectories_fading}
+\end{figure}
+
+

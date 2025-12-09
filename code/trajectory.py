@@ -147,23 +147,29 @@ class TrajectoryManager:
                             x1, y1, p1, frame1 = sampled_positions[i]
                             x2, y2, p2, frame2 = sampled_positions[i+1]
                             
-                            # Draw only if this segment hasn't been passed yet
-                            if current_frame is not None and current_frame > frame1:
-                                continue
+                            # Draw only future segments unless fading is disabled
+                            if CONFIG and getattr(CONFIG, '__class__', None):
+                                fading_enabled = True if 'TRAJECTORY_FADING' not in globals() else TRAJECTORY_FADING
+                            else:
+                                fading_enabled = True
+                            if fading_enabled:
+                                if current_frame is not None and current_frame > frame1:
+                                    continue
                             
                             # Inverted alpha logic
                             color = QColor(base_color)
-                            
-                            if current_frame is not None:
-                                frames_until_segment = frame1 - current_frame
-                                
-                                # Closer segments are more opaque (~1.0)
-                                # Farther segments are more transparent (~0.2)
-                                distance_factor = frames_until_segment / fade_frames_players
-                                # Inverted mapping: near -> opaque, far -> transparent
-                                final_alpha = max(0.2, 1.0 - distance_factor * 0.8)
+                            if 'TRAJECTORY_FADING' in globals() and not TRAJECTORY_FADING:
+                                final_alpha = 1.0
                             else:
-                                final_alpha = 0.8
+                                if current_frame is not None:
+                                    frames_until_segment = frame1 - current_frame
+                                    # Closer segments are more opaque (~1.0)
+                                    # Farther segments are more transparent (~0.2)
+                                    distance_factor = frames_until_segment / fade_frames_players
+                                    # Inverted mapping: near -> opaque, far -> transparent
+                                    final_alpha = max(0.2, 1.0 - distance_factor * 0.8)
+                                else:
+                                    final_alpha = 0.8
                             
                             color.setAlphaF(final_alpha)
                             
@@ -186,23 +192,25 @@ class TrajectoryManager:
                     x1, y1, p1, frame1 = sampled_ball_positions[i]
                     x2, y2, p2, frame2 = sampled_ball_positions[i+1]
                     
-                    # Same logic for the ball: only draw future segments
-                    if current_frame is not None and current_frame > frame1:
-                        continue
+                    # Only draw future segments unless fading is disabled
+                    if 'TRAJECTORY_FADING' in globals() and TRAJECTORY_FADING:
+                        if current_frame is not None and current_frame > frame1:
+                            continue
                     
                     # Same inverted alpha logic for the ball
                     color = QColor(ball_color)
-                    
-                    if current_frame is not None:
-                        frames_until_segment = frame1 - current_frame
-                        
-                        # Closer segments are more opaque (~1.0)
-                        # Farther segments are more transparent (~0.3)
-                        distance_factor = frames_until_segment / fade_frames_ball
-                        # Inverted mapping: near -> opaque, far -> transparent
-                        final_alpha = max(0.3, 1.0 - distance_factor * 0.7)
+                    if 'TRAJECTORY_FADING' in globals() and not TRAJECTORY_FADING:
+                        final_alpha = 1.0
                     else:
-                        final_alpha = 0.9
+                        if current_frame is not None:
+                            frames_until_segment = frame1 - current_frame
+                            # Closer segments are more opaque (~1.0)
+                            # Farther segments are more transparent (~0.3)
+                            distance_factor = frames_until_segment / fade_frames_ball
+                            # Inverted mapping: near -> opaque, far -> transparent
+                            final_alpha = max(0.3, 1.0 - distance_factor * 0.7)
+                        else:
+                            final_alpha = 0.9
                     
                     color.setAlphaF(final_alpha)
                     
@@ -265,24 +273,28 @@ class TrajectoryManager:
                     x1, y1, frame1 = positions[i]
                     x2, y2, frame2 = positions[i + 1]
                     
-                    # Only draw future segments
-                    if current_frame is not None and current_frame > frame1:
-                        continue
+                    # Only draw future segments unless fading is disabled
+                    if 'TRAJECTORY_FADING' in globals() and TRAJECTORY_FADING:
+                        if current_frame is not None and current_frame > frame1:
+                            continue
                     
                     # Compute opacity based on temporal distance
                     color = QColor(base_color)
-                    if current_frame is not None:
-                        frames_until_segment = frame1 - current_frame
-                        total_frames = loop_end - loop_start
-                        
-                        if total_frames > 0:
-                            distance_factor = frames_until_segment / total_frames
-                            # Closer -> more opaque
-                            final_alpha = max(0.4, 1.0 - distance_factor * 0.6)
+                    if 'TRAJECTORY_FADING' in globals() and not TRAJECTORY_FADING:
+                        final_alpha = 1.0
+                    else:
+                        if current_frame is not None:
+                            frames_until_segment = frame1 - current_frame
+                            total_frames = loop_end - loop_start
+                            
+                            if total_frames > 0:
+                                distance_factor = frames_until_segment / total_frames
+                                # Closer -> more opaque
+                                final_alpha = max(0.4, 1.0 - distance_factor * 0.6)
+                            else:
+                                final_alpha = 0.9
                         else:
                             final_alpha = 0.9
-                    else:
-                        final_alpha = 0.9
                     
                     color.setAlphaF(final_alpha)
                     
@@ -302,24 +314,28 @@ class TrajectoryManager:
                 x1, y1, frame1 = ball_positions[i]
                 x2, y2, frame2 = ball_positions[i + 1]
                 
-                # Only draw future segments
-                if current_frame is not None and current_frame > frame1:
-                    continue
+                # Only draw future segments unless fading is disabled
+                if 'TRAJECTORY_FADING' in globals() and TRAJECTORY_FADING:
+                    if current_frame is not None and current_frame > frame1:
+                        continue
                 
                 # Compute opacity for the ball
                 color = QColor(BALL_COLOR)
-                if current_frame is not None:
-                    frames_until_segment = frame1 - current_frame
-                    total_frames = loop_end - loop_start
-                    
-                    if total_frames > 0:
-                        distance_factor = frames_until_segment / total_frames
-                        # Closer -> more opaque
-                        final_alpha = max(0.5, 1.0 - distance_factor * 0.5)
+                if 'TRAJECTORY_FADING' in globals() and not TRAJECTORY_FADING:
+                    final_alpha = 1.0
+                else:
+                    if current_frame is not None:
+                        frames_until_segment = frame1 - current_frame
+                        total_frames = loop_end - loop_start
+                        
+                        if total_frames > 0:
+                            distance_factor = frames_until_segment / total_frames
+                            # Closer -> more opaque
+                            final_alpha = max(0.5, 1.0 - distance_factor * 0.5)
+                        else:
+                            final_alpha = 1.0
                     else:
                         final_alpha = 1.0
-                else:
-                    final_alpha = 1.0
                 
                 color.setAlphaF(final_alpha)
                 

@@ -1,0 +1,120 @@
+% ----------------------------------------------------------
+% -----  Future Work  -----------
+% ----------------------------------------------------------
+
+\chapter{Future Work}
+\label{chap:future_work}
+
+
+While the current prototype demonstrates the feasibility of a modular, data-driven tactical diagramming tool, several functionalities identified during the design phase remain to be implemented. Addressing these gaps would significantly extend the analytical and pedagogical capabilities of the system.
+
+\section{Missing Functionalities from the Strategic/Tactical Views}
+
+\subsection{User-Authored Event Editing from Annotations}
+\label{subsec:user_authored_event_editing}
+In \textbf{Simulation Mode}, users can draw arrows directly on the pitch to represent intended actions. 
+These arrows can already be typed (pass, shot, dribble, tackle, etc.) and bound to one or two players through their properties. 
+At present, however, they remain purely descriptive: they do not permanently alter the underlying tracking or event data. 
+Instead, any modification of player positions or actions is applied only locally and temporarily for the duration of the simulation, leaving the raw data untouched. 
+
+
+The planned extension is to link these user-authored arrows to the underlying data model so that authored actions (a) alter trajectories in the simulation itself and (b) yield a proposed update in the event log aligned to the edited frames. 
+In \textbf{Strategic View} (blank pitch), the exact same authoring pattern would then create entirely new hypothetical events.
+
+\paragraph{Scope and behavior (planned).}
+\begin{itemize}
+  \item \textbf{Action typing:} each user-drawn arrow carries an action label from a fixed set \{\emph{pass}, \emph{shot}, \emph{dribble}, \emph{tackle}, …\}.
+  \item \textbf{Actor binding:} one origin player is required; a target player is required for passes and optional otherwise.
+  \item \textbf{Light coordinate edits:} in match mode, small drags of player markers are allowed to reflect “what-if” micro-adjustments; these edits are scoped to the selected interval.
+  \item \textbf{Event update:} saving the authored action would insert or amend the corresponding event in the timeline (time range derived from the arrow length and playback tempo). Edited markers would be visually outlined and filterable.
+  \item \textbf{Reversibility:} the edit could be reviewed and reverted from the inspector without touching the raw tracking file.
+\end{itemize}
+
+\paragraph{Next steps.}
+Stabilize the action schema (type, actor(s), frame range, geometry), harmonize commit/revert flows in both views, and finalize timeline regeneration so authored events remain frame-accurate while preserving source data integrity.
+
+
+
+
+\subsection{Strategic View Implementation}
+The current version supports data-driven Tactical View but lacks a fully interactive Strategic View for hypothetical scenario building.  
+\textbf{Implementation path:}
+\begin{itemize}
+    \item Integrate the existing annotation and simulation modules into a “blank-pitch” mode (Strategic View), where the pitch is initially empty and the user can manually place players, draw tactical movements, and simulate hypothetical scenarios without loading match data.
+    This mode would reuse the same modular components used in the Tactical View (e.g., \texttt{PitchWidget}, annotation managers, camera controls) but initialised with an empty state, ensuring code reuse and minimising additional complexity.  
+    From an analytical standpoint, this would also allow coaches to design and test set-piece variations or pressing schemes in isolation before cross-referencing them with match data.
+
+    \item Allow full manual player placement, with multi-selection and grouped movement.
+    \item Provide a formation library and ``playbook'' for reusable tactical sequences.
+\end{itemize}
+
+\subsection{Split-Screen Comparison}
+The envisioned ability to compare two tactical setups or scenarios side-by-side is not yet implemented.  
+\textbf{Implementation path:}
+\begin{itemize}
+    \item Instantiate two \texttt{PitchWidget} instances in a synchronized container.
+    \item Implement linked timelines and camera controls so that both views remain temporally aligned.
+    \item Support drag-and-drop of annotations between the two panes.
+\end{itemize}
+
+\subsection{Custom Composition Creation}
+The current prototype can display formations from match data but does not allow saving fully custom line-ups.  
+\textbf{Implementation path:}
+\begin{itemize}
+    \item Extend the project save format to include arbitrary player roles, positions, and kit designs.
+    \item Implement a formation editor with role naming, role--position binding, and export to the formation library.
+\end{itemize}
+
+\section{Analytical Extensions}
+\subsection{Passing Channel Feasibility Prediction}
+While the UI concept is defined, the system currently lacks an algorithm to categorise passing options.  
+The proposed approach builds on the \emph{pitch control} framework introduced by Spearman~\cite{spearman2017physics}, which models the probability of each team controlling the ball at a given location.  
+
+Visual analytics systems such as PassVizor~\cite{xie2020passvizor} have shown the value of interactive exploration of passing patterns, but also highlight a key limitation: they provide little modelling of the opposing team and thus cannot fully assess whether a passing lane is realistically viable.  
+Our contribution addresses this gap by incorporating explicit measures of opponent influence—through pitch control and interception likelihood—into the evaluation of passing channel feasibility.
+
+\textbf{Proposed approach:}
+\begin{itemize}
+    \item \textbf{Input:} Current positions and velocities of all players, ball carrier ID, target player ID.
+    \item \textbf{Feature extraction:}
+    \begin{itemize}
+        \item \emph{Line-of-sight occlusion} --- detect if any opponent’s intercept path crosses the straight line from passer to receiver.
+        \item \emph{Pitch control model} --- compute each team’s probability of controlling the ball at multiple points along the passing path using the probabilistic approach of Spearman~\cite{spearman2017physics}.
+        \item \emph{Receiver context} --- distance to nearest defender at estimated reception time, receiver’s orientation relative to ball.
+    \end{itemize}
+    \item \textbf{Classification:}
+    \begin{itemize}
+        \item Train a logistic regression or gradient-boosted tree on historical labelled passes (easy = completed with no pressure; risky = contested or forced back; impossible = intercepted).
+        \item Output category and associated confidence.
+    \end{itemize}
+    \item \textbf{Visualization:}
+    \begin{itemize}
+        \item Green solid line for ``Easy'', yellow dashed line for ``Risky'', red crossed line for ``Impossible''.
+        \item Optional hover tooltip with contributing factors (e.g., ``High interception risk: defender 2.3 m away at reception'').
+    \end{itemize}
+\end{itemize}
+
+These features are updated in real time from the tracking stream and evaluated only for plausible targets—filtered by passer orientation, line-of-sight, and distance thresholds—to preserve UI responsiveness.
+
+
+\subsection{Enhanced Shooting Zone Prediction}
+Current cones are static in shape and rely on distance/angle heuristics.  
+\textbf{Implementation path:}
+\begin{itemize}
+    \item Incorporate data-driven expected goals (xG) models conditioned on shot context.
+    \item Vary cone width and gradient dynamically based on xG distribution.
+\end{itemize}
+
+\subsection{Context-Aware Auto-Zoom Enhancements}
+The current auto-zoom considers ball location and player spread. We propose adding simple triggers that adapt the zoom and framing to the tactical context, while keeping transitions smooth and unobtrusive.
+
+\textbf{Implementation path:}
+\begin{itemize}
+    \item \textbf{Wing switch (long diagonal):} When the ball’s x-coordinate crosses the pitch midline at high horizontal speed and most teammates are on the far side, smoothly zoom out, pan, and zoom in toward the new attacking side.
+    \item \textbf{Shot likelihood (final third focus):} If the ball carrier is close to goal and facing it, zoom in slightly and frame the view ahead of the carrier to capture the attacking movement.
+    \item \textbf{Crossing context:} When the ball is near the sideline in the attacking third, adjust the framing to include the penalty area and far-post lane.
+    \item \textbf{Fast transition:} If the ball speed is high or possession changes in midfield, briefly zoom out to show the new team shape, then return to the normal view.
+    \item \textbf{Set-piece presets:} If basic event tags are available (corner, free kick), move to a pre-defined camera position suited to that situation.
+\end{itemize}
+
+All changes should transition smoothly, avoiding sudden jumps, and include short cooldowns to prevent constant zoom adjustments.

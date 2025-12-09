@@ -1,0 +1,205 @@
+\chapter{Appendix}
+% ================================
+% APPENDIX A — THEME OPTIMIZATION
+% ================================
+\section{Pseudocode for Theme Optimization}
+\label{app:theme_optimization}
+
+\paragraph{Inputs}
+\begin{description}
+  \item[mode] One of \texttt{CLASSIC} or \texttt{BLACK\&WHITE}.
+  \item[teamColors] Home and away main/secondary kit colors.
+  \item[ballColor] Color used to render the ball.
+\end{description}
+
+\paragraph{Fixed elements}
+Pitch and pitch-line colors are taken from the selected mode (classic green with white lines, or a black\&white preset adapted to overall kit brightness) and are not optimised.
+
+\paragraph{Outputs}
+\begin{description}
+  \item[theme] Dictionary with keys \texttt{grass}, \texttt{line}, \texttt{offside}, \texttt{orientation\_arrow} where \texttt{offside}, \texttt{orientation\_arrow} are optimized colors.
+\end{description}
+
+\begin{algorithm}[H]
+\caption{Overlay-Focused Theme Generation}
+\begin{algorithmic}[1]
+\Require mode, teamColors, ballColor
+\State $(grass,line) \gets \textsc{PresetFromMode}(\textit{mode},\ \textit{teamColors})$ \Comment{fixed by preset}
+\State $F \gets \{grass, line, ballColor\} \cup \textit{teamColors}$ \Comment{forbidden set}
+\State $\textit{offside} \gets \textsc{PickColor}(F)$
+\State $F \gets F \cup \{\textit{offside}\}$ \Comment{keep overlays distinct}
+\State $\textit{orientation\_arrow} \gets \textsc{PickColor}(F)$
+\State \Return $\{\texttt{grass}:grass,\ \texttt{line}:line,\ \texttt{offside}:\textit{offside},\ \texttt{orientation\_arrow}:\textit{orientation\_arrow}\}$
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[H]
+\caption{\textsc{PickColor}$(F, \ grass)$}
+\begin{algorithmic}[1]
+\State $C \gets \textsc{GenerateCandidatesLCH}()$ \Comment{compact LCH grid: varied hues, a few lightness/chroma tiers}
+\State $C \gets \{c \in C\ |\ \textsc{InGamut}(c)\}$ \Comment{candidate is representable in sRGB without clipping}
+\State $C \gets \{c \in C\ |\ \textsc{PerceptuallyDistinct}(c,\ F)\}$ \Comment{reject if perceptual distance to any forbidden colour is too small}
+\State $C \gets \{c \in C\ |\ \textsc{HueSeparated}(c,\ F)\}$ \Comment{avoid near-family hue clashes}
+\State $C \gets \{c \in C\ |\ \textsc{VisibleAgainst}(c,\ grass)\}$ \Comment{ensure overlay legibility against the pitch}
+\If{$C = \varnothing$}
+    \State \Return \textsc{Fallback}()
+\EndIf
+\State $best \gets$ \textbf{None};\quad $bestScore \gets -\infty$
+\For{$c \in C$}
+    \State $min \gets \min\big(\textsc{Visibility}(c,\ t) \ \text{for all} \ t \in F\big)$ \Comment{worst-case contrast}
+    \State $avg \gets \text{average}\big(\textsc{Visibility}(c,\ t) \ \text{for all} \ t \in F\big)$ \Comment{overall contrast}
+    \State $score \gets min + 0.2 \cdot avg$
+    \If{$score > bestScore$}
+        \State $bestScore \gets score$;\quad $best \gets c$
+    \EndIf
+\EndFor
+\State \Return $best$
+\end{algorithmic}
+\end{algorithm}
+
+
+\paragraph{Notes on implementation}
+Conversions between sRGB, CIELAB, and LCH as well as perceptual distance and contrast computations are handled by utility functions (see \texttt{utils/color\_utils.py}) .
+
+
+
+% ==========================================
+% APPENDIX B — DEFENSIVE PRESSURE INTENSITY
+% ==========================================
+\section{Pseudocode for Pressure Visualization}
+\label{app:pressure_visualization}
+
+\paragraph{Inputs (frame $t$)}
+\begin{description}
+  \item[carrierId] ID of the ball carrier.
+  \item[defenders] List/Set of opponent player IDs to evaluate.
+  \item[positions] Map or arrays giving $(x,y)$ for every player at frame $t$.
+  \item[speeds] Arrays giving speed $S$ (m/s) for every player at frame $t$.
+  \item[accelerations] Arrays giving acceleration magnitude $A$ (m/s$^2$) for every player at frame $t$.
+  \item[orientations] Arrays giving orientation $\theta$ (radians) for every player at frame $t$.
+ \item[$\bm{t}_{\text{thresh}}$] Time horizon for “pressable” situations (default $1.2$\,s).
+  \item[$\bm{\sigma}$] Logistic width (default $0.5$\,s).
+\end{description}
+
+\paragraph{Output}
+\begin{description}
+  \item[pressureIntensity] Scalar in $[0,1]$ for the frame.
+\end{description}
+
+\begin{algorithm}[H]
+\caption{\textsc{PressureIntensity} (frame-level aggregation)}
+\begin{algorithmic}[1]
+\Require \texttt{carrierId}, \texttt{defenders}, \texttt{positions}, \texttt{speeds}, \texttt{accelerations}, \texttt{orientations}, $t_{\text{thresh}}$, $\sigma$
+\State $(p_x,p_y) \gets \texttt{positions}[\texttt{carrierId}]$
+\State $P_{\text{none}} \gets 1$ \Comment{probability that nobody is pressing}
+\ForAll{$id \in \texttt{defenders}$}
+\State \parbox[t]{0.8\linewidth}{%
+    $(d,\ \mathbf{u},\ v_0,\ a_\parallel) \gets \text{\textsc{ProjectKinematics}}(id,\ (p_x,p_y),\ \text{\texttt{positions}},\ \text{\texttt{speeds}},$ \\
+    \hspace*{\algorithmicindent} $\text{\texttt{accelerations}},\ \text{\texttt{orientations}})$%
+}
+  \State $t \gets \textsc{SolveTTI}(d,\ v_0,\ a_\parallel)$
+  \State $p_i \gets \text{Logistic}\big((t_{\text{thresh}} - t)/\sigma\big)$
+  \State $P_{\text{none}} \gets P_{\text{none}} \cdot (1 - p_i)$
+\EndFor
+\State \Return $\texttt{pressureIntensity} \gets \text{clip}\big(1 - P_{\text{none}},\ 0,\ 1\big)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{\textsc{ProjectKinematics}$(id,\ (p_x,p_y),\ positions,\ speeds,\ accelerations,\\ orientations)$}
+\begin{algorithmic}[1]
+\State $(x,y) \gets positions[id]$;\quad $S \gets speeds[id]$;\quad $A \gets accelerations[id]$;\quad $\theta \gets orientations[id]$
+\If{any of $(x,y,S,A,\theta)$ is missing} \State \textbf{continue} \EndIf
+\State $(dx,dy) \gets (p_x-x,\ p_y-y)$;\quad $d \gets \textsc{Hypot}(dx,dy)$
+
+\State $\mathbf{u} \gets (dx/d,\ dy/d)$ \Comment{unit direction defender$\rightarrow$carrier}
+\State $\mathbf{h} \gets (\cos\theta,\ \sin\theta)$ \Comment{heading unit vector}
+\State $v_0 \gets S\ (\mathbf{h}\!\cdot\!\mathbf{u})$;\quad $a_\parallel \gets A\ (\mathbf{h}\!\cdot\!\mathbf{u})$ \Comment{signed components toward carrier}
+\State \Return $(d,\ \mathbf{u},\ v_0,\ a_\parallel)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{\textsc{SolveTTI}$(d,\ v_0,\ a_\parallel)$}
+\begin{algorithmic}[1]
+\If{$d=0$} \State \Return $t \gets 0$ \EndIf
+\If{$|a_\parallel| < 10^{-9}$} \Comment{constant-speed closure}
+   \State \Return $t \gets d / \max(v_0,\ 10^{-6})$
+\Else \Comment{constant-acceleration closure along the line of sight}
+   \State $\Delta \gets v_0^2 + 2\,a_\parallel\,d$
+   \If{$\Delta \ge 0$}
+      \State \Return $t \gets \dfrac{-v_0 + \sqrt{\Delta}}{a_\parallel}$ \Comment{physically meaningful root}
+   \Else
+      \State \Return $t \gets d / \max(|v_0|,\ 10^{-6})$ \Comment{fallback when no real solution}
+   \EndIf
+\EndIf
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Rendering}  
+When the ball is active at the global frame, a single translucent disc (fixed radius) is drawn \emph{centered on the carrier}.  
+Its fill color is obtained from \texttt{get\_pressure\_color} (see data\_processing.py); only color encodes intensity (radius and opacity are kept constant to avoid overlapping between visual elements on the pitch).
+
+
+
+
+% ==================================
+% APPENDIX C — orientation_estimation
+% ==================================
+
+\section{Orientation Estimation (from tracking positions)}
+\label{app:orientation_estimation}
+
+\paragraph{Inputs}
+\begin{description}
+  \item[$\bm{\mathrm{pos}(id,t)}$ :] Player 2D position at frame \(t\).
+  \item[$\bm{w}$ :] Window length for smoothing (frames).
+  \item[$\bm{p}$ :] Polynomial order for Savitzky-Golay filter.
+\end{description}
+
+\paragraph{Output} $\bm{{orientation}(id,t)}$ : Orientation of player \texttt{id} at frame \texttt{t}.
+
+\begin{algorithm}[H]
+\caption{Orientation Estimation from Frame-to-Frame Displacements}
+\begin{algorithmic}[1]
+\Require \(\mathrm{pos}(id,t)\) for all \(t\); smoothing window \(w\); polynomial order \(p\)
+\State \(\Delta x_t \gets x(id,t) - x(id,t-1)\); \quad \(\Delta y_t \gets y(id,t) - y(id,t-1)\)
+\State \(\theta_t \gets \arctan2(\Delta y_t,\ \Delta x_t)\) \Comment raw orientation series
+\State \(c_t \gets \cos(\theta_t)\); \quad \(s_t \gets \sin(\theta_t)\) \Comment avoid wrap-around artifacts
+\If{length of series \(\ge w\)}
+   \State \(c^{\mathrm{smooth}} \gets \mathrm{SavitzkyGolay}(c,\ w,\ p)\)
+   \State \(s^{\mathrm{smooth}} \gets \mathrm{SavitzkyGolay}(s,\ w,\ p)\)
+   \State \(\theta^{\mathrm{smooth}}_t \gets \arctan2\!\big(s^{\mathrm{smooth}}_t,\ c^{\mathrm{smooth}}_t\big)\)
+\Else
+   \State \(\theta^{\mathrm{smooth}}_t \gets \theta_t\)
+\EndIf
+\State \Return \(\theta^{\mathrm{smooth}}_t\)
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\section{Event Projection to Frames}
+\label{app:event_project_to_frames}
+
+\paragraph{Inputs}
+\begin{description}
+  \item[\(\{\tau_i\} :\) list(float)] Event timestamps (s).
+  \item[\(\{t_j\} :\) list(float)] Frame times (s).
+  \item[\(\epsilon :\) float] Matching tolerance (s).
+\end{description}
+\paragraph{Output} Mapping \(\text{event } i \rightarrow \text{ frame } j^\star\).
+
+\begin{algorithm}[H]
+\caption{Event Projection to Frames}
+\begin{algorithmic}[1]
+\Require eventTimestamps \(\{\tau_i\}\), frameTimes \(\{t_j\}\), tolerance \(\epsilon\)
+\ForAll{\(\tau_i\)}
+  \State \(j^\star \gets \arg\min_j |t_j - \tau_i|\)
+  \If{\(|t_{j^\star} - \tau_i| \le \epsilon\)}
+    \State attach event \(i\) to frame \(j^\star\)
+  \EndIf
+\EndFor
+\end{algorithmic}
+\end{algorithm}

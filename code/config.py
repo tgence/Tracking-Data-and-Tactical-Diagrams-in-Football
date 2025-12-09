@@ -177,3 +177,8 @@ LENGTH_EXTRA_TIME = 2 * LENGTH_OVERTIME_HALF
 # Players and ball trajectories
 TRAJECTORY_STYLE = Qt.PenStyle.DotLine
 TRAJECTORY_SAMPLE_RATE = 5
+TRAJECTORY_FADING = True  # Set to False to disable progressive fading of trajectories
+
+# Simulation preview mode: when True, only display user-drawn arrows (team-colored)
+# without computing or drawing simulated/future trajectories
+SIMULATION_ONLY_ARROWS = True

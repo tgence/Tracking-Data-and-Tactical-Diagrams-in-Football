@@ -194,13 +194,14 @@ class ArrowAnnotationManager:
         if len(self.arrow_points) < 2:
             self.arrow_points = []
             self.remove_arrow_preview()
-            return
+            return None
 
         arrow_item = self.draw_arrow(self.arrow_points, preview=False)
         if arrow_item:
             self.arrows.append(arrow_item)
         self.arrow_points = []
         self.remove_arrow_preview()
+        return arrow_item
 
 
     def try_finish_arrow(self):
@@ -1177,6 +1178,7 @@ class RectangleZoneItem(QGraphicsItemGroup):
         # Create resize handles
         self._create_resize_handles()
         
+   
     def setSelected(self, selected):
         """Handle selection state."""
         super().setSelected(selected)
@@ -2024,3 +2026,359 @@ class EllipseZoneItem(QGraphicsItemGroup):
             if handle.scene():
                 handle.scene().removeItem(handle)
         self._resize_handles.clear()
+
+
+# ===== Cone ZONE ITEM =====
+class ConeZoneItem(QGraphicsItemGroup):
+    """Graphical item representing a conical (sector) tactical zone.
+
+    Defined by an apex point, an orientation (degrees), a radius, and a spread angle.
+    """
+    def __init__(self, apex, direction_point, color, width, style, fill_alpha,
+                 spread_deg=30.0, preview=False, parent=None, edge_point_2=None):
+        super().__init__(parent)
+        self.apex = QPointF(apex)
+        self.direction_point = QPointF(direction_point)
+        self.edge_point_2 = QPointF(edge_point_2) if edge_point_2 is not None else None
+
+        self.zone_color = color
+        self.zone_width = width
+        self.zone_style = style
+        self.zone_fill_alpha = fill_alpha
+        self.spread_deg = float(spread_deg)
+        self.is_preview = preview
+
+        # --- Canonical parameters for rotation ---
+        dx = self.direction_point.x() - self.apex.x()
+        dy = self.direction_point.y() - self.apex.y()
+        self.radius = max(1.0, math.hypot(dx, dy))
+        # orientation in Qt convention (0°=+X, CCW positif)
+        self.orientation_deg = -math.degrees(math.atan2(dy, dx))
+        # Mémorise si l’utilisateur a défini 2 bords (mode "two-edges")
+        self._two_edges = self.edge_point_2 is not None
+        # ----------------------------------------
+
+        self._resize_handles = {}
+        self._is_resizing = False
+        self._resize_start_pos = None
+        self._resize_corner = None
+        self._original_points = None
+
+        self._create_zone_item()
+        self._create_selection_rect()
+
+        from PyQt6.QtWidgets import QGraphicsItem
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+
+    
+    def _build_path(self):
+        """Build a sector centered at apex with correct angle convention for Qt."""
+        def qt_deg(d):           # math → Qt screen coords
+            return -float(d)     # invert because Y is down in Qt
+
+        path = QPainterPath(self.apex)
+
+        if self.edge_point_2 is not None:
+            # Build from the two edge points
+            dx1 = self.direction_point.x() - self.apex.x()
+            dy1 = self.direction_point.y() - self.apex.y()
+            dx2 = self.edge_point_2.x()  - self.apex.x()
+            dy2 = self.edge_point_2.y()  - self.apex.y()
+            r1 = max(1.0, math.hypot(dx1, dy1))
+            r2 = max(1.0, math.hypot(dx2, dy2))
+            R  = max(r1, r2)
+
+            a1 = math.degrees(math.atan2(-dy1, dx1))  # math angle (y up)
+            a2 = math.degrees(math.atan2(-dy2, dx2))
+
+            # shortest sweep from a1 → a2
+            delta = (a2 - a1 + 540.0) % 360.0 - 180.0  # (-180,180]
+            if delta >= 0:
+                start_angle = a1
+                sweep       = delta
+            else:
+                start_angle = a2
+                sweep       = -delta
+
+            rect = QRectF(self.apex.x() - R, self.apex.y() - R, 2 * R, 2 * R)
+
+            # move to first edge, then arc with Qt angles
+            start_rad = math.radians(qt_deg(start_angle))
+            sx = self.apex.x() + R * math.cos(start_rad)
+            sy = self.apex.y() - R * math.sin(start_rad)
+            path.moveTo(self.apex)
+            path.lineTo(QPointF(sx, sy))
+            path.arcTo(rect, qt_deg(start_angle), -sweep)  # NEGATIVE sweep for consistency
+            path.closeSubpath()
+            return path
+
+        # Symmetric cone: keep interior angle self.spread_deg and rotate with self.orientation_deg
+        start_angle = self.orientation_deg - self.spread_deg / 2.0  # math angle
+        qt_start = qt_deg(start_angle)
+        qt_sweep = -self.spread_deg   # NEGATIVE sweep
+
+        rect = QRectF(self.apex.x() - self.radius, self.apex.y() - self.radius,
+                      2 * self.radius, 2 * self.radius)
+
+        path.moveTo(self.apex)
+        start_rad = math.radians(qt_start)
+        sx = self.apex.x() + self.radius * math.cos(start_rad)
+        sy = self.apex.y() - self.radius * math.sin(start_rad)
+        path.lineTo(QPointF(sx, sy))
+        path.arcTo(rect, qt_start, qt_sweep)
+        path.closeSubpath()
+        return path
+    
+    def _create_zone_item(self):
+        self.zone_item = QGraphicsPathItem()
+        self.zone_item.setPath(self._build_path())
+        # Match other zones: use scaled width from zone_width
+        scaled_width = self.zone_width * 0.25
+        pen = QPen(QColor(self.zone_color), scaled_width)
+        pen.setStyle(Qt.PenStyle.DashLine if self.zone_style in ("dashed", "dotted") else Qt.PenStyle.SolidLine)
+        self.zone_item.setPen(pen)
+        brush_color = QColor(self.zone_color)
+        brush_color.setAlpha(self.zone_fill_alpha)
+        self.zone_item.setBrush(QBrush(brush_color))
+        self.addToGroup(self.zone_item)
+    
+    def _create_selection_rect(self):
+        self._selection_rect = QGraphicsRectItem()
+        self._selection_rect.setPen(QPen(QColor(self.zone_color), 0.1))
+        self._selection_rect.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        self._selection_rect.setVisible(False)
+        self.addToGroup(self._selection_rect)
+        self._create_resize_handles()
+    
+    def _create_resize_handles(self):
+            """Create resize handles at the corners of the selection rectangle."""
+            corner_types = ['top_left', 'top_right', 'bottom_left', 'bottom_right']
+            
+            for corner_type in corner_types:
+                handle = ResizeHandle(corner_type, self, self.zone_color)
+                handle.setVisible(False)
+                self._resize_handles[corner_type] = handle
+
+
+    def paint(self, painter, option, widget):
+        """Override to remove default white square"""
+        option_modified = QStyleOptionGraphicsItem(option)
+        option_modified.state &= ~QStyle.StateFlag.State_Selected
+        super().paint(painter, option_modified, widget)
+
+    def _update_selection_rect(self):
+        bounds = self.zone_item.path().boundingRect()
+        self._selection_rect.setRect(bounds)
+        self._selection_rect.setPen(QPen(QColor(self.zone_color), 0.1))
+    
+
+    def setSelected(self, selected):
+        super().setSelected(selected)
+        self._selection_rect.setVisible(bool(selected))
+        if selected:
+            self._update_selection_rect()
+    
+    def set_color(self, color):
+        self.zone_color = color
+        pen = self.zone_item.pen()
+        pen.setColor(QColor(color))
+        self.zone_item.setPen(pen)
+        brush_color = QColor(color)
+        brush_color.setAlpha(self.zone_fill_alpha)
+        self.zone_item.setBrush(QBrush(brush_color))
+        self._update_selection_rect()
+    
+    def set_width(self, width):
+        self.zone_width = width
+        scaled_width = width * 0.25
+        pen = QPen(QColor(self.zone_color), scaled_width)
+        pen.setStyle(Qt.PenStyle.DashLine if self.zone_style == "dashed" else Qt.PenStyle.SolidLine)
+        self.zone_item.setPen(pen)
+        self._update_selection_rect()
+    
+    def set_fill_alpha(self, alpha):
+        self.zone_fill_alpha = alpha
+        brush_color = QColor(self.zone_color)
+        brush_color.setAlpha(alpha)
+        self.zone_item.setBrush(QBrush(brush_color))
+        self._update_selection_rect()
+    
+    def set_style(self, style):
+        self.zone_style = "dashed" if str(style).lower() in ("dash", "dashed", "--") else "solid"
+        pen = self.zone_item.pen()
+        pen.setStyle(Qt.PenStyle.DashLine if self.zone_style == "dashed" else Qt.PenStyle.SolidLine)
+        self.zone_item.setPen(pen)
+        self._update_selection_rect()
+    
+    # --- rotation qui conserve l’angle intérieur et le rayon ---
+    def set_rotation(self, angle_deg: float):
+        self.orientation_deg = float(angle_deg)
+        self.zone_item.setPath(self._build_path())
+        self._update_selection_rect()
+
+    def get_rotation(self) -> float:
+        return float(self.orientation_deg)
+
+    # --- si tu changes l’angle intérieur, on reconstruit sans toucher au rayon ---
+    def set_spread_deg(self, angle_deg: float):
+        self.spread_deg = float(max(0.0, angle_deg))
+        self.zone_item.setPath(self._build_path())
+        self._update_selection_rect()
+
+    def get_spread_deg(self) -> float:
+        return float(self.spread_deg)
+
+class ConeZoneManager:
+    """Manage creation, selection, and storage of conical tactical zones (2-click flow)."""
+    def __init__(self, scene):
+        self.scene = scene
+        self.zones = []
+        self.zone_points = []                # [apex, end] pendant la création
+        self.zone_color = DEFAULT_ZONE_COLOR
+        self.zone_width = DEFAULT_ZONE_WIDTH
+        self.zone_style = "solid"
+        self.zone_fill_alpha = DEFAULT_ZONE_ALPHA
+        self.zone_spread_deg = 60.0          # angle intérieur par défaut (modif ensuite dans props)
+        self.zone_preview = None
+        self.selected_zone = None
+        self.current_mode = "select"
+
+    # ====== état / sélection ======
+    def set_mode(self, mode):
+        self.current_mode = mode
+        self.zone_points = []
+        self.remove_zone_preview()
+        self.clear_selection()
+
+    def clear_selection(self):
+        for zone in list(self.zones):
+            try:
+                zone.setSelected(False)
+            except RuntimeError:
+                self.zones.remove(zone)
+        self.selected_zone = None
+
+    def select_zone(self, zone):
+        self.clear_selection()
+        self.selected_zone = zone
+        if zone:
+            zone.setSelected(True)
+
+    def setSelected(self, selected):
+        if self.selected_zone:
+            self.selected_zone.setSelected(selected)
+
+    # ====== styles par défaut / sélection ======
+    def set_color(self, color):
+        if self.selected_zone:
+            self.selected_zone.set_color(color)
+        else:
+            self.zone_color = color
+
+    def set_width(self, width):
+        if self.selected_zone:
+            self.selected_zone.set_width(width)
+        else:
+            self.zone_width = width
+
+    def set_style(self, style):
+        normalized = "dashed" if str(style).lower() in ("dash", "dashed", "--") else "solid"
+        if self.selected_zone:
+            self.selected_zone.set_style(normalized)
+        else:
+            self.zone_style = normalized
+
+    def set_fill_alpha(self, alpha):
+        if self.selected_zone:
+            self.selected_zone.set_fill_alpha(alpha)
+        else:
+            self.zone_fill_alpha = alpha
+
+    # ====== cycle création (2 clics) ======
+    def remove_zone_preview(self):
+        if self.zone_preview:
+            try:
+                self.scene.removeItem(self.zone_preview)
+            except RuntimeError:
+                pass
+            self.zone_preview = None
+
+    def add_point(self, pos):
+        """Click handler (comme rect/ellipse)."""
+        if len(self.zone_points) < 2:
+            self.zone_points.append(QPointF(pos))
+
+    def update_preview(self, pos):
+        """Preview live (après clic 1, sans drag)."""
+        if not self.zone_points:
+            return
+
+        self.remove_zone_preview()
+
+        # 1 point → apex fixé, le rayon suit la souris ; on affiche un cône
+        apex = self.zone_points[0]
+        end = QPointF(pos)
+
+        # Construire un item cone en preview, angle intérieur = self.zone_spread_deg
+        preview = ConeZoneItem(
+            apex=apex,
+            direction_point=end,
+            color=self.zone_color,
+            width=self.zone_width,
+            style=self.zone_style,
+            fill_alpha=self.zone_fill_alpha,
+            spread_deg=self.zone_spread_deg,
+            preview=True
+        )
+        # Le preview ne doit pas intercepter les clics
+        from PyQt6.QtWidgets import QGraphicsItem
+        preview.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+        preview.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        preview.setZValue(1000)
+
+        self.zone_preview = preview
+        self.scene.addItem(self.zone_preview)
+
+    def finish_zone(self):
+        """Finalise au 2e clic (comme rect/ellipse)."""
+        if len(self.zone_points) < 2:
+            return False
+
+        self.remove_zone_preview()
+
+        apex, end = self.zone_points[0], self.zone_points[1]
+        zone = ConeZoneItem(
+            apex=apex,
+            direction_point=end,
+            color=self.zone_color,
+            width=self.zone_width,
+            style=self.zone_style,
+            fill_alpha=self.zone_fill_alpha,
+            spread_deg=self.zone_spread_deg,
+            preview=False
+        )
+        self.scene.addItem(zone)
+        self.zones.append(zone)
+
+        # reset état création
+        self.zone_points = []
+        return True
+
+    # ====== édition/suppression ======
+    def cancel_zone(self):
+        self.remove_zone_preview()
+        self.zone_points = []
+
+    def delete_selected_zone(self):
+        if self.selected_zone:
+            zone = self.selected_zone
+            # Clean handles si tu en rajoutes plus tard (pas nécessaire ici)
+            if zone in self.zones:
+                self.zones.remove(zone)
+            try:
+                self.scene.removeItem(zone)
+            except RuntimeError:
+                pass
+        self.clear_selection()

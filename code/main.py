@@ -18,9 +18,9 @@ from PyQt6.QtGui import QColor, QIcon, QFont, QAction
 
 # Local imports
 from pitch import PitchWidget
-from annotation.annotation import ArrowAnnotationManager, RectangleZoneManager, EllipseZoneManager
+from annotation.annotation import ArrowAnnotationManager, RectangleZoneManager, EllipseZoneManager, ConeZoneManager
 from annotation.arrow.arrow_properties import ArrowProperties
-from annotation.zone_properties import ZoneProperties
+from annotation.zone_properties import ZoneProperties, ConeZoneProperties
 from data_processing import load_data, extract_match_actions_from_events, format_match_time, compute_pressure
 from trajectory import TrajectoryManager
 from match_actions import ActionFilterBar, create_nav_button
@@ -597,6 +597,11 @@ class MainWindow(QWidget):
         self.ellipse_zone_button.clicked.connect(lambda: self.set_tool_mode("ellipse_zone"))
         tools_panel.addWidget(self.ellipse_zone_button)
         
+        self.cone_zone_button = QPushButton("Cone Zone")
+        self.cone_zone_button.setCheckable(True)
+        self.cone_zone_button.clicked.connect(lambda: self.set_tool_mode("cone_zone"))
+        tools_panel.addWidget(self.cone_zone_button)
+        
         tools_panel.addStretch(1)
         
         return tools_panel
@@ -615,6 +620,7 @@ class MainWindow(QWidget):
         self.annotation_manager = ArrowAnnotationManager(self.pitch_widget.scene)
         self.rectangle_zone_manager = RectangleZoneManager(self.pitch_widget.scene)
         self.ellipse_zone_manager = EllipseZoneManager(self.pitch_widget.scene)
+        self.cone_zone_manager = ConeZoneManager(self.pitch_widget.scene)
         self.tactical_manager = TacticalSimulationManager(
             self.annotation_manager, self.pitch_widget, 
             home_ids, away_ids, home_colors, away_colors
@@ -625,6 +631,8 @@ class MainWindow(QWidget):
         tools_layout = self.layout().itemAt(1).layout()  # Panel droit
         tools_layout.insertWidget(0, self.camera_control_widget)
         tools_layout.insertWidget(1, QLabel("────────────────"))
+        
+        # Removed sequencer controls per user request
 
 
         # Context menu for arrows
@@ -632,6 +640,7 @@ class MainWindow(QWidget):
         
         # Context menu for zones
         self.zone_context_menu = ZoneProperties(self)
+        self.cone_zone_context_menu = ConeZoneProperties(self) 
         
         self._setup_arrow_context_menu()
         self._setup_zone_context_menu()
@@ -667,6 +676,8 @@ class MainWindow(QWidget):
         self.arrow_context_menu.toPlayerSelected.connect(self._on_to_player_selected)
         self.arrow_context_menu.deleteRequested.connect(self._on_arrow_delete_requested)
         self.arrow_context_menu.propertiesConfirmed.connect(self._on_arrow_properties_confirmed)
+        
+    # Removed sequencer handler per user request
     
     def _connect_signals(self):
         """Connect UI controls, timer, and camera widget signals."""
@@ -770,9 +781,9 @@ class MainWindow(QWidget):
         
         half, idx, halftime = self.frame_manager.get_frame_data(frame_number)
         
-        # Simulation mode: future trajectories
+        # Simulation mode: trajectories rendering
         if self.simulation_mode and self.show_trajectories_checkbox.isChecked():
-            if self.tactical_manager.tactical_arrows:
+            if self.tactical_manager.tactical_arrows and not SIMULATION_ONLY_ARROWS:
                 self.tactical_manager.calculate_simulated_trajectories(
                     self.sim_interval_spin.value(),
                     self.simulation_start_frame,
@@ -780,10 +791,13 @@ class MainWindow(QWidget):
                     n_frames,
                     self.frame_manager.get_frame_data
                 )
-                
                 simulated_data = self.tactical_manager.get_simulated_trajectories()
                 self.trajectory_manager.draw_simulated_trajectories(
-                    simulated_data, frame_number, self.simulation_start_frame, self.simulation_end_frame, ball_color=self.settings_manager.ball_color
+                    simulated_data,
+                    frame_number,
+                    self.simulation_start_frame,
+                    self.simulation_end_frame,
+                    ball_color=self.settings_manager.ball_color
                 )
             else:
                 self.trajectory_manager.calculate_future_trajectories(
@@ -798,7 +812,7 @@ class MainWindow(QWidget):
                 self.trajectory_manager.draw_future_trajectories(
                     current_frame=frame_number,
                     loop_start=self.simulation_start_frame,
-                    loop_end=self.simulation_end_frame, 
+                    loop_end=self.simulation_end_frame,
                     ball_color=self.settings_manager.ball_color
                 )
         
@@ -952,23 +966,46 @@ class MainWindow(QWidget):
         self.curve_button.setChecked(mode == "curve")
         self.rectangle_zone_button.setChecked(mode == "rectangle_zone")
         self.ellipse_zone_button.setChecked(mode == "ellipse_zone")
+        self.cone_zone_button.setChecked(mode == "cone_zone")
         self.pitch_widget.view.setCursor(Qt.CursorShape.ArrowCursor if mode == "select" else Qt.CursorShape.CrossCursor)
         
         if mode == "select":
             self.annotation_manager.try_finish_arrow()
             self.rectangle_zone_manager.cancel_zone()
             self.ellipse_zone_manager.cancel_zone()
+            self.cone_zone_manager.cancel_zone()
+            # Disable mouse tracking in select to reduce event noise
+            try:
+                self.pitch_widget.view.setMouseTracking(False)
+                self.pitch_widget.view.viewport().setMouseTracking(False)
+            except Exception:
+                pass
         if mode in ("arrow", "curve"):
             self._pause_match()
             self.rectangle_zone_manager.set_mode("select")
             self.ellipse_zone_manager.set_mode("select")
-        if mode in ("rectangle_zone", "ellipse_zone"):
+            self.cone_zone_manager.set_mode("select")
+            # Ensure we receive move events without holding mouse button
+            try:
+                self.pitch_widget.view.setMouseTracking(True)
+                self.pitch_widget.view.viewport().setMouseTracking(True)
+            except Exception:
+                pass
+        if mode in ("rectangle_zone", "ellipse_zone", "cone_zone"):
             self._pause_match()
             if mode == "rectangle_zone":
                 self.rectangle_zone_manager.set_mode("create")
-            else:
+            elif mode == "ellipse_zone":
                 self.ellipse_zone_manager.set_mode("create")
+            else:
+                self.cone_zone_manager.set_mode("create")
             self.annotation_manager.set_mode("select")
+            # Ensure we receive move events without holding mouse button
+            try:
+                self.pitch_widget.view.setMouseTracking(True)
+                self.pitch_widget.view.viewport().setMouseTracking(True)
+            except Exception:
+                pass
         
         if mode not in ("rectangle_zone", "ellipse_zone"):
             self.annotation_manager.set_mode(mode)
@@ -1104,6 +1141,7 @@ class MainWindow(QWidget):
                         self.annotation_manager.select_arrow(clicked_arrow)
                         self.rectangle_zone_manager.clear_selection()
                         self.ellipse_zone_manager.clear_selection()
+                        self.cone_zone_manager.clear_selection()
                         # IMPORTANT: Don't return True here to allow dragging
                         return False  # Let Qt handle drag & drop
                     elif clicked_zone:
@@ -1112,15 +1150,22 @@ class MainWindow(QWidget):
                         if clicked_zone in self.rectangle_zone_manager.zones:
                             self.rectangle_zone_manager.select_zone(clicked_zone)
                             self.ellipse_zone_manager.clear_selection()
-                        else:
+                            self.cone_zone_manager.clear_selection()
+                        elif clicked_zone in self.ellipse_zone_manager.zones:
                             self.ellipse_zone_manager.select_zone(clicked_zone)
                             self.rectangle_zone_manager.clear_selection()
+                            self.cone_zone_manager.clear_selection()
+                        else:
+                            self.cone_zone_manager.select_zone(clicked_zone)
+                            self.rectangle_zone_manager.clear_selection()
+                            self.ellipse_zone_manager.clear_selection()
                         return False  # Let Qt handle drag & drop
                     else:
                         # Click on empty area: clear selection
                         self.annotation_manager.clear_selection()
                         self.rectangle_zone_manager.clear_selection()
                         self.ellipse_zone_manager.clear_selection()
+                        self.cone_zone_manager.clear_selection()
                         return True  # We can intercept this
                         
                 elif event.button() == Qt.MouseButton.RightButton:
@@ -1129,6 +1174,7 @@ class MainWindow(QWidget):
                         self.annotation_manager.select_arrow(clicked_arrow)
                         self.rectangle_zone_manager.clear_selection()
                         self.ellipse_zone_manager.clear_selection()
+                        self.cone_zone_manager.clear_selection()
                         
                         global_pos = self.pitch_widget.view.mapToGlobal(event.position().toPoint())
                         # Adjust position to keep menu within screen bounds
@@ -1146,13 +1192,20 @@ class MainWindow(QWidget):
                         # Right click: select AND open zone properties menu
                         self.annotation_manager.clear_selection()
                         if clicked_zone in self.rectangle_zone_manager.zones:
-
                             self.rectangle_zone_manager.select_zone(clicked_zone)
                             self.ellipse_zone_manager.clear_selection()
-                        else:
-
+                            self.cone_zone_manager.clear_selection()
+                            menu = self.zone_context_menu
+                        elif clicked_zone in self.ellipse_zone_manager.zones:
                             self.ellipse_zone_manager.select_zone(clicked_zone)
                             self.rectangle_zone_manager.clear_selection()
+                            self.cone_zone_manager.clear_selection()
+                            menu = self.zone_context_menu
+                        else:
+                            self.cone_zone_manager.select_zone(clicked_zone)
+                            self.rectangle_zone_manager.clear_selection()
+                            self.ellipse_zone_manager.clear_selection()
+                            menu = self.cone_zone_context_menu 
                         
                         global_pos = self.pitch_widget.view.mapToGlobal(event.position().toPoint())
                         # Adjust position to keep menu within screen bounds
@@ -1164,7 +1217,7 @@ class MainWindow(QWidget):
                             global_pos.setY(global_pos.y() - 500)
                         
 
-                        self.zone_context_menu.show_for_zone(clicked_zone, global_pos)
+                        menu.show_for_zone(clicked_zone, global_pos)
                         return True
             # IMPORTANT: Do not intercept move events in select mode
             # to allow drag & drop of selected arrows
@@ -1178,7 +1231,57 @@ class MainWindow(QWidget):
                     self.annotation_manager.add_point(scene_pos)
                     
                     if not self.annotation_manager.arrow_curved and len(self.annotation_manager.arrow_points) == 2:
-                        self.annotation_manager.finish_arrow()
+                        new_arrow = self.annotation_manager.finish_arrow()
+                        # If in simulation mode, immediately prompt for associations
+                        if new_arrow and self.simulation_mode:
+                            # Determine action type based on style
+                            action_type = self.tactical_manager.get_action_type(new_arrow)
+                            # Prepare player datasets for selection
+                            home_players = {}
+                            away_players = {}
+                            for player_id in home_ids:
+                                number = id2num.get(player_id, "?")
+                                main_color, sec_color, num_color = home_colors.get(player_id, ("#4CAF50", "#2E7D32", "#FFFFFF"))
+                                home_players[player_id] = (number, main_color, sec_color, num_color)
+                            for player_id in away_ids:
+                                number = id2num.get(player_id, "?")
+                                main_color, sec_color, num_color = away_colors.get(player_id, ("#F44336", "#B71C1C", "#FFFFFF"))
+                                away_players[player_id] = (number, main_color, sec_color, num_color)
+
+                            # Show selection dialog(s) according to action type
+                            from annotation.arrow.arrow_player_selection import ArrowPlayerSelection
+                            # Compute default candidates: nearest to start/end
+                            start_pt = new_arrow.arrow_points[0]
+                            end_pt = new_arrow.arrow_points[-1]
+                            default_from = self.tactical_manager.find_player_at_position(start_pt, self.timeline_widget.value(), xy_objects, self.frame_manager.get_frame_data)
+                            default_to = self.tactical_manager.find_player_at_position(end_pt, self.timeline_widget.value(), xy_objects, self.frame_manager.get_frame_data) if action_type == 'pass' else None
+
+                            # From player (always)
+                            dlg_from = ArrowPlayerSelection(home_players, away_players, title="Select From Player", parent=self, default_selected_id=default_from)
+                            if dlg_from.exec() == dlg_from.DialogCode.Accepted:
+                                from_id = dlg_from.selected_player_id
+                                if from_id:
+                                    current_frame = self.timeline_widget.value()
+                                    self.tactical_manager.associate_arrow_with_player(new_arrow, from_id, current_frame, xy_objects)
+                                    # Color the arrow with the team's main color
+                                    if from_id in home_ids:
+                                        team_color = home_colors.get(from_id, ["#4CAF50"])[0]
+                                    else:
+                                        team_color = away_colors.get(from_id, ["#F44336"])[0]
+                                    new_arrow.set_color(team_color)
+                                    if hasattr(new_arrow, 'refresh_visual'):
+                                        new_arrow.refresh_visual()
+                            # For pass: also select receiver
+                            if action_type == 'pass':
+                                dlg_to = ArrowPlayerSelection(home_players, away_players, title="Select To Player", parent=self, default_selected_id=default_to)
+                                if dlg_to.exec() == dlg_to.DialogCode.Accepted:
+                                    to_id = dlg_to.selected_player_id
+                                    if to_id:
+                                        self.tactical_manager.set_pass_receiver(to_id)
+
+                            # Refresh simulated preview immediately
+                            if self.show_trajectories_checkbox.isChecked():
+                                self.update_scene(self.timeline_widget.value())
                         self.set_tool_mode("select")
                 elif event.button() == Qt.MouseButton.RightButton:
                     if len(self.annotation_manager.arrow_points) < 2:
@@ -1191,20 +1294,32 @@ class MainWindow(QWidget):
                 self.annotation_manager.update_preview(scene_pos)
                 return True
         
-        # Zone creation modes (rectangle/ellipse)
-        elif self.current_tool in ("rectangle_zone", "ellipse_zone"):
+        # Zone creation modes (rectangle/ellipse/cone)
+        elif self.current_tool in ("rectangle_zone", "ellipse_zone", "cone_zone"):
             if event.type() == QEvent.Type.MouseButtonPress:
                 if event.button() == Qt.MouseButton.LeftButton:
+                    try:
+                        self.pitch_widget.view.setMouseTracking(True)
+                        self.pitch_widget.view.viewport().setMouseTracking(True)
+                    except Exception:
+                        pass
                     scene_pos = self.pitch_widget.view.mapToScene(event.position().toPoint())
                     if self.current_tool == "rectangle_zone":
                         self.rectangle_zone_manager.add_point(scene_pos)
-                    else:
+                        self.rectangle_zone_manager.update_preview(scene_pos)
+                    elif self.current_tool == "ellipse_zone":
                         self.ellipse_zone_manager.add_point(scene_pos)
+                        self.ellipse_zone_manager.update_preview(scene_pos)
+                    else:
+                        self.cone_zone_manager.add_point(scene_pos)
+                        self.cone_zone_manager.update_preview(scene_pos)
                 elif event.button() == Qt.MouseButton.RightButton:
                     if self.current_tool == "rectangle_zone":
                         self.rectangle_zone_manager.cancel_zone()
-                    else:
+                    elif self.current_tool == "ellipse_zone":
                         self.ellipse_zone_manager.cancel_zone()
+                    else:
+                        self.cone_zone_manager.cancel_zone()
                     self.set_tool_mode("select")
                 return True
             
@@ -1212,8 +1327,10 @@ class MainWindow(QWidget):
                 scene_pos = self.pitch_widget.view.mapToScene(event.position().toPoint())
                 if self.current_tool == "rectangle_zone":
                     self.rectangle_zone_manager.update_preview(scene_pos)
-                else:
+                elif self.current_tool == "ellipse_zone":
                     self.ellipse_zone_manager.update_preview(scene_pos)
+                else:
+                    self.cone_zone_manager.update_preview(scene_pos)
                 return True
             
             elif event.type() == QEvent.Type.MouseButtonRelease:
@@ -1221,8 +1338,11 @@ class MainWindow(QWidget):
                     if self.current_tool == "rectangle_zone":
                         if self.rectangle_zone_manager.finish_zone():
                             self.set_tool_mode("select")
-                    else:
+                    elif self.current_tool == "ellipse_zone":
                         if self.ellipse_zone_manager.finish_zone():
+                            self.set_tool_mode("select")
+                    else:
+                        if self.cone_zone_manager.finish_zone():
                             self.set_tool_mode("select")
                 return True
         
@@ -1279,12 +1399,12 @@ class MainWindow(QWidget):
 
         
         for item in items:
-
             # Check if the item is a zone or part of a zone
             parent = item
             while parent:
-                if parent in self.rectangle_zone_manager.zones or parent in self.ellipse_zone_manager.zones:
-
+                if (parent in self.rectangle_zone_manager.zones or
+                    parent in self.ellipse_zone_manager.zones or
+                    parent in self.cone_zone_manager.zones):
                     return parent
                 parent = parent.parentItem()
         
@@ -1303,7 +1423,10 @@ class MainWindow(QWidget):
             self.rectangle_zone_manager.delete_selected_zone()
         elif self.ellipse_zone_manager.selected_zone:
             self.ellipse_zone_manager.delete_selected_zone()
+        elif self.cone_zone_manager.selected_zone:  # +++
+            self.cone_zone_manager.delete_selected_zone()
         self.zone_context_menu.hide()
+        self.cone_zone_context_menu.hide()
 
     def _on_zone_properties_confirmed(self):
         """Called when the zone properties popup is confirmed."""
@@ -1315,6 +1438,9 @@ class MainWindow(QWidget):
         # Connect zone signals
         self.zone_context_menu.deleteRequested.connect(self._on_zone_delete_requested)
         self.zone_context_menu.propertiesConfirmed.connect(self._on_zone_properties_confirmed)
+        # cone menu
+        self.cone_zone_context_menu.deleteRequested.connect(self._on_zone_delete_requested)
+        self.cone_zone_context_menu.propertiesConfirmed.connect(self._on_zone_properties_confirmed)
     
     def on_theme_mode_changed(self, new_mode: str):
         """Regenerate theme given team colors and refresh the scene and settings UI."""

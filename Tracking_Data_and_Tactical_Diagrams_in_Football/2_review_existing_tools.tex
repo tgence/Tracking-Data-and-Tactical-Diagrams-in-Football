@@ -1,0 +1,96 @@
+
+% ----------------------------------------------------------
+% -------- Review of Existing Tools and Related Work ------
+% ----------------------------------------------------------
+
+\chapter{Review of Existing Tools and Related Work}
+\label{chap:2_review_existing_tools}
+
+% -------------------- 2.1 --------------------
+\section{Tactics Boards and Diagram Tools}
+Tactics boards have long been fundamental instruments for planning and communicating football strategy. Traditional magnetic whiteboards remain common at every level of the game, but are fundamentally limited by their analog nature: they cannot store, replay, or easily share scenarios, nor support nuanced representations such as dynamic formations or coordinated team movements~\cite{morgulev2018sports, vidal2022automatic}. The last decade has seen the rise of digital tactical board, both as commercial products (e.g., TacticalPad~\cite{tacticalpad2025}, Easy2Coach~\cite{easy2coach2025}, Tactical Board~\cite{tacticalboard2025}, Tacticalista~\cite{tacticalista2025}) and as academic systems~\cite{liu2024smartboard, fernandez2020soccermap, delibas2019interactive}.
+
+Commercial tools generally focus on enabling coaches to create, edit, and share tactical diagrams via direct manipulation. They typically support drag-and-drop player tokens, drawing tools (arrows, zones), pre-defined formations, and sometimes simple animation features (e.g., frame-by-frame movement or stepwise scenario building). However, these platforms prioritize usability over analytical depth: there is limited support for advanced data import (such as tracking data), analytical overlays, or dynamic representations beyond basic “whiteboard” metaphors. Integration with external match datasets or event data is rare, and conventions for diagram annotation vary widely between products~\cite{tacticalpad2025, easy2coach2025, tacticalista2025, fussballtraining2025}.
+
+Academic systems take a more experimental approach, often exploring how advanced visualization or interaction techniques can support new kinds of tactical insight. For instance, Smartboard integrates LLM-based exploration to generate tactical options and scenario variations~\cite{liu2024smartboard}; SoccerMap explores deep learning approaches for interpretable visual analysis~\cite{fernandez2020soccermap}; and some tools focus on interactive dashboards for exploring spatial event data~\cite{delibas2019interactive}. However, many research prototypes remain difficult to adopt in day-to-day coaching workflows, reflecting a broader gap between visualization research and production-quality tools, a phenomenon observed across domains~\cite{walsh2023lack}.
+
+
+
+Despite this diversity, there is still no widely-accepted standard for digital tactical diagramming. The space is fragmented, and user needs, especially for supporting nuanced tactical communication,are only partially met by current tools.
+
+
+% -------------------- 2.2 --------------------
+\section{Visual Language and Representation}
+
+The visual encoding of tactics, how positions, movements, and relationships are represented, remains a major challenge. Unlike sports like American football, football lacks a standardized visual language for tactics diagrams. Most commercial and academic tools rely on a set of ad-hoc conventions: circles for players, arrows for movement, and lines for passes or zones, with color or shape used to distinguish teams or roles.
+However, symbology and encoding choices are inconsistent, both across and within tools~\cite{bertin2011semiology}. Few platforms offer flexible or extensible visual vocabularies, and there is little consensus on how to represent tactical elements such as coordinated pressing, player roles, or interaction zones. This lack of standardization complicates the comparison of diagrams, limits interoperability, and can even hinder communication between analysts and coaches~\cite{perin2013soccerstories, sarmento2014match}.
+
+The scientific literature in visual analytics and information visualization has long emphasized the importance of consistent visual encoding and semiology\cite{bertin2011semiology, tufte1991envisioning, ware2013information}, yet practical adoption in football tactics software remains limited. Despite widespread use of circles, arrows, and zones, there is no domain-wide standard for football tactics symbology. Most tools adopt ad-hoc encodings, with limited agreement on how to depict roles, coordinated pressing, or interaction zones~\cite{perin2013soccerstories, sarmento2014match}. 
+Visualization theory strongly argues for consistent encodings and a clear visual grammar~\cite{bertin2011semiology, ware2013information, tufte1991envisioning}, 
+yet football-specific conventions remain fragmented and largely tool-specific.
+
+
+% -------------------- 2.3 --------------------
+\section{Interactive Diagram Creation and Annotation}
+
+The core function of a digital tactical board is to enable interactive creation and annotation of diagrams: defining player positions, movement, and tactical plans, ideally in a way that supports both clarity and flexibility.
+Commercial platforms typically enable basic interaction through drag-and-drop placement, click-to-assign roles or numbers, and manual drawing of arrows or zones. Some tools (e.g., TacticalPad, Easy2Coach) offer limited animation support via frame-by-frame scenario building, but this remains rare.
+Academic research explores more advanced interactive features, including scenario libraries, stepwise tactical planning, and direct manipulation interfaces tailored to the specific requirements of football~\cite{liu2024smartboard, delibas2019interactive}. For example, Smartboard investigates how large language models can generate tactical scenario variations based on user input~\cite{liu2024smartboard}, and several tools experiment with gestures or contextual menus for more efficient annotation workflows.
+
+However, interactive support for complex tactical structures, such as group behavior, dependencies, or nested formations, remains weak. Most platforms require laborious manual editing for anything beyond simple movement lines or position changes, and only a minority allow saving and reusing user-defined situations as templates or libraries.
+The potential for more advanced, football-specific interaction (e.g., grouped movement, dynamic role assignment) is recognized but remains underdeveloped in the current ecosystem.
+
+
+
+\paragraph{Illustrative example: keyframe authoring and playback (TacticalPad).}
+To illustrate the type of animation support available in commercial diagramming tools, 
+Figures~\ref{fig:tacticalpad_keyframes} and \ref{fig:tacticalpad_playback} 
+present two common interactions in TacticalPad \cite{tacticalpad2025}: 
+(i) authoring keyframes with trajectory previews, and 
+(ii) playing the authored sequence with a single click. 
+Similar stepwise scenario-building functions can also be found in other platforms such as 
+Easy2Coach and Tactical Board~\cite{easy2coach2025, tacticalboard2025}.
+
+These examples show how commercial platforms typically approach animation: 
+users manually position players across successive frames, connect them with arrows, 
+and then preview the sequence as a simple animation. 
+This workflow is useful for producing quick illustrative sketches, 
+but it comes with clear limitations. 
+Every scenario has to be created from scratch, trajectories are imagined rather than grounded in match data, 
+and editing becomes cumbersome when dealing with more complex situations. 
+In short, current commercial tools enable basic playback of user-authored sequences, 
+yet remain detached from real game contexts and offer little integration with analytical data sources. 
+This gap between illustrative animation and data-driven analysis is one of the challenges that motivates the design of more advanced systems.
+  
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{Figures/TACTICALPAD-KEYFRAMES.png}
+  \caption{\textbf{TacticalPad : keyframe authoring with trajectory previews.}
+  Each panel corresponds to a successive \emph{frame} (label in top-left). 
+  Arrows indicate movements between frames: faded strokes represent earlier motion, 
+  while more opaque strokes denote intended upcoming motion. 
+  This progressive opacity provides a visual cue for temporal context and intent.}
+  \label{fig:tacticalpad_keyframes}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{Figures/TACTICALPAD-PLAYBACK.png}
+  \caption{\textbf{TacticalPad : one-click playback of authored sequences.}
+  After placing players and drawing arrows between frames, pressing \emph{Play} runs the authored animation.}
+  \label{fig:tacticalpad_playback}
+\end{figure}
+
+
+
+% -------------------- 2.4 --------------------
+\section{Integration of Match Data and Automated Diagram Generation}
+
+While some commercial platforms support basic video annotation, the integration of match data (tracking, event data) directly into tactical diagram tools is rare. Most commercial products do not support importing spatiotemporal datasets or generating diagrams from raw data~\cite{tacticalpad2025, easy2coach2025}. Instead, event and tracking data are typically visualized in specialized analytics platforms, not in tactical diagram tools~\cite{bassek2025integrated, metulini2016spatio, xie2020passvizor, cortez2025improving}.
+
+Recent academic work, however, has pushed the boundaries. Systems such as Forvizor~\cite{wu2018forvizor}, PassVizor~\cite{xie2020passvizor}, and the Sketchplan approach~\cite{seebacher2021investigating} demonstrate that interpretable diagrams and animations can be generated directly from tracking or event datasets.
+PassVizor, for example, analyzes pass dynamics via trajectory pattern mining and interactive visual analytics~\cite{xie2020passvizor}. 
+Where pass feasibility is concerned, probabilistic models of ball control (“pitch control”) provide a principled basis for estimating interception risk along candidate pass paths~\cite{spearman2017physics}.
+Furthermore, these academic systems remain largely proof-of-concept, and lack user-friendly workflows or robust interfaces for practical coaching and routine analysis.
+
+As a result, there is a clear gap between what is theoretically possible with automated or data-driven tactical diagramming, and what is implemented in mainstream coaching tools. The lack of interoperability and unified conventions continues to hinder broader adoption and integration of advanced analytics into everyday coaching workflows.
